@@ -1,0 +1,23 @@
+public typealias RGBA8  = LodePNGRGBA<UInt8>
+public typealias RGBA16 = LodePNGRGBA<UInt16>
+public typealias RGB8   = LodePNGRGB<UInt8>
+public typealias RGB16  = LodePNGRGB<UInt16>
+public typealias GA8    = LodePNGGrayAlpha<UInt8>
+public typealias GA16   = LodePNGGrayAlpha<UInt16>
+public typealias Gray1  = LodePNGSmallGrayscale<LodePNGOneBitColor>
+public typealias Gray2  = LodePNGSmallGrayscale<LodePNGTwoBitColor>
+public typealias Gray4  = LodePNGSmallGrayscale<LodePNGFourBitColor>
+public typealias Gray8  = LodePNGGrayscale<UInt8>
+public typealias Gray16 = LodePNGGrayscale<UInt16>
+
+public typealias RGBA8Image  = LodePNGImage<RGBA8>
+public typealias RGBA16Image = LodePNGImage<RGBA16>
+public typealias RGB8Image   = LodePNGImage<RGB8>
+public typealias RGB16Image  = LodePNGImage<RGB16>
+public typealias GA8Image    = LodePNGImage<RGB8>
+public typealias GA16Image   = LodePNGImage<RGB16>
+public typealias Gray1Image  = LodePNGImage<Gray1>
+public typealias Gray2Image  = LodePNGImage<Gray2>
+public typealias Gray4Image  = LodePNGImage<Gray4>
+public typealias Gray8Image  = LodePNGImage<Gray8>
+public typealias Gray16Image = LodePNGImage<Gray16>
