@@ -211,9 +211,9 @@ extension LodePNGImage: Equatable {
 extension LodePNGImage: RandomAccessCollection, MutableCollection {
 	public typealias Element = Color
 
-	public var startIndex: Int { 0 }
+	@inlinable public var startIndex: Int { 0 }
 
-	public var endIndex: Int { width * height }
+	@inlinable public var endIndex: Int { width * height }
 
 	@inlinable public subscript(position: Int) -> Color {
 		get {
