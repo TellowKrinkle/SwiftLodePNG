@@ -49,18 +49,41 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 		@usableFromInline let width: UInt32
 		@usableFromInline let height: UInt32
 
+		@inlinable func checkSize() {
+			// Overflow check now so we don't have to later
+			precondition((Int(width) * Int(height) * Color.bpp + 7) / 8 == size)
+		}
+
 		/// Bytes in image
 		@inlinable var size: Int {
 			let bpp = Color.bpp
 			if bpp % 8 == 0 {
-				return Int(width) * Int(height) * (bpp / 8)
+				return Int(width) &* Int(height) &* (bpp / 8)
 			} else {
-				return (Int(width) * Int(height) * bpp + 7) / 8
+				return (Int(width) &* Int(height) &* bpp &+ 7) / 8
 			}
+		}
+
+		/// Raw storage
+		@inlinable var buffer: UnsafeMutableRawBufferPointer { return .init(start: raw, count: size) }
+
+		/// Gives mutable access to raw storage
+		@inlinable func withUnsafeMutableBytes<Return>(_ execute: (UnsafeMutableRawBufferPointer) throws -> Return) rethrows -> Return {
+			return try execute(buffer)
 		}
 
 		@inlinable init(width: UInt32, height: UInt32, raw: UnsafeMutableRawPointer?) {
 			(self.width, self.height, self.raw) = (width, height, raw)
+			checkSize()
+		}
+
+		@inlinable subscript(i: Int) -> Color {
+			get {
+				Color(from: .init(buffer), index: i)
+			}
+			set {
+				newValue.store(to: buffer, index: i)
+			}
 		}
 
 		@usableFromInline init(copying other: COWHelper) {
@@ -68,6 +91,7 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 			(width, height) = (other.width, other.height)
 			raw = malloc(size)
 			memcpy(raw!, other.raw!, size)
+			checkSize()
 		}
 
 		deinit {
@@ -90,27 +114,25 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 			actual = COWHelper(copying: actual)
 		}
 	}
-	/// Raw storage
-	@inlinable var raw: UnsafeMutableRawBufferPointer { return .init(start: actual.raw, count: actual.size) }
 	/// Gives mutable access to raw storage
 	@inlinable mutating func withUnsafeMutableBytes<Return>(_ execute: (UnsafeMutableRawBufferPointer) throws -> Return) rethrows -> Return {
 		makeMutable()
-		return try withExtendedLifetime(actual) { try execute(raw) }
+		return try actual.withUnsafeMutableBytes(execute)
 	}
 	/// Gives access to raw storage
 	@inlinable func withUnsafeBytes<Return>(_ execute: (UnsafeRawBufferPointer) throws -> Return) rethrows -> Return {
-		return try withExtendedLifetime(actual) { try execute(.init(raw)) }
+		return try actual.withUnsafeMutableBytes { try execute(.init($0)) }
 	}
 
 	@inlinable public subscript(x x: Int, y y: Int) -> Color {
 		get {
 			precondition((0..<width).contains(x) && (0..<height).contains(y))
-			return Color(from: UnsafeRawBufferPointer(raw), index: x + y * width)
+			return actual[x + y * width]
 		}
 		set {
 			precondition((0..<width).contains(x) && (0..<height).contains(y))
 			makeMutable()
-			newValue.store(to: raw, index: x + y * width)
+			actual[x + y * width] = newValue
 		}
 	}
 
@@ -191,7 +213,7 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 	/// Take ownership of the image's buffer, destroying it
 	@inlinable public mutating func takeOwnershipOfBuffer() -> UnsafeMutableRawBufferPointer {
 		makeMutable()
-		let out = raw
+		let out = actual.buffer
 		actual.raw = nil
 		return out
 	}
@@ -213,17 +235,17 @@ extension LodePNGImage: RandomAccessCollection, MutableCollection {
 
 	@inlinable public var startIndex: Int { 0 }
 
-	@inlinable public var endIndex: Int { width * height }
+	@inlinable public var endIndex: Int { width &* height }
 
 	@inlinable public subscript(position: Int) -> Color {
 		get {
 			precondition(indices.contains(position))
-			return Color(from: .init(raw), index: position)
+			return actual[position]
 		}
 		set {
 			makeMutable()
 			precondition(indices.contains(position))
-			newValue.store(to: raw, index: position)
+			actual[position] = newValue
 		}
 	}
 }
