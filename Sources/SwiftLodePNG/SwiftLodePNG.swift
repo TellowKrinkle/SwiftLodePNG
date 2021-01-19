@@ -207,3 +207,23 @@ extension LodePNGImage: Equatable {
 		}
 	}
 }
+
+extension LodePNGImage: RandomAccessCollection, MutableCollection {
+	public typealias Element = Color
+
+	public var startIndex: Int { 0 }
+
+	public var endIndex: Int { width * height }
+
+	@inlinable public subscript(position: Int) -> Color {
+		get {
+			precondition(indices.contains(position))
+			return Color(from: .init(raw), index: position)
+		}
+		set {
+			makeMutable()
+			precondition(indices.contains(position))
+			newValue.store(to: raw, index: position)
+		}
+	}
+}
