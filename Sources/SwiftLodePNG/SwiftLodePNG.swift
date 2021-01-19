@@ -67,7 +67,7 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 			let size = other.size
 			(width, height) = (other.width, other.height)
 			raw = malloc(size)
-			memcpy(raw, other.raw, size)
+			memcpy(raw!, other.raw!, size)
 		}
 
 		deinit {
@@ -120,7 +120,7 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 		let size = actual.size
 		precondition(data.count >= size)
 		actual.raw = malloc(size)
-		memcpy(actual.raw, data, size)
+		memcpy(actual.raw!, data, size)
 	}
 
 	/// Create a new image with the given dimensions
