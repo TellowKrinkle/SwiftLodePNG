@@ -26,11 +26,12 @@ distribution.
 import CLodePNG
 
 public protocol LodePNGPixel {
+	associatedtype BufferType
 	static var bitDepth: UInt32 { get }
 	static var enumValue: LodePNGColorType { get }
 	static var bpp: Int { get }
-	init(from buffer: UnsafeRawBufferPointer, index: Int)
-	func store(to buffer: UnsafeMutableRawBufferPointer, index: Int)
+	init(from buffer: UnsafePointer<BufferType>, index: Int)
+	func store(to buffer: UnsafeMutablePointer<BufferType>, index: Int)
 }
 
 public protocol LodePNGNormalSupportedColor {
@@ -43,11 +44,13 @@ extension UInt16: LodePNGNormalSupportedColor {}
 
 /// A pixel storing three colors and an alpha channel
 public struct LodePNGRGBA<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
+	public typealias BufferType = (Value, Value, Value, Value)
+
 	@inlinable public static var bitDepth: UInt32 { return UInt32(MemoryLayout<Value>.size * 8) }
 	@inlinable public static var enumValue: LodePNGColorType { return .LCT_RGBA }
 	@inlinable public static var bpp: Int { return Int(bitDepth) * 4 }
 
-	@usableFromInline var values: (Value, Value, Value, Value)
+	@usableFromInline var values: BufferType
 
 	@inlinable public var r: Value { get { return .init(bigEndian: values.0) } set { values.0 = newValue.bigEndian } }
 	@inlinable public var g: Value { get { return .init(bigEndian: values.1) } set { values.1 = newValue.bigEndian } }
@@ -58,21 +61,22 @@ public struct LodePNGRGBA<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
 		values = (r.bigEndian, g.bigEndian, b.bigEndian, a.bigEndian)
 	}
 
-	@inlinable public init(from buffer: UnsafeRawBufferPointer, index: Int) {
-		values = buffer.bindMemory(to: (Value, Value, Value, Value).self)[index]
+	@inlinable public init(from buffer: UnsafePointer<BufferType>, index: Int) {
+		values = buffer[index]
 	}
-	@inlinable public func store(to buffer: UnsafeMutableRawBufferPointer, index: Int) {
-		buffer.bindMemory(to: (Value, Value, Value, Value).self)[index] = values
+	@inlinable public func store(to buffer: UnsafeMutablePointer<BufferType>, index: Int) {
+		buffer[index] = values
 	}
 }
 
 /// A pixel storing three colors
 public struct LodePNGRGB<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
+	public typealias BufferType = (Value, Value, Value)
 	@inlinable public static var bitDepth: UInt32 { return UInt32(MemoryLayout<Value>.size * 8) }
 	@inlinable public static var enumValue: LodePNGColorType { return .LCT_RGB }
 	@inlinable public static var bpp: Int { return Int(bitDepth) * 3 }
 
-	@usableFromInline var values: (Value, Value, Value)
+	@usableFromInline var values: BufferType
 
 	@inlinable public var r: Value { get { return .init(bigEndian: values.0) } set { values.0 = newValue.bigEndian } }
 	@inlinable public var g: Value { get { return .init(bigEndian: values.1) } set { values.1 = newValue.bigEndian } }
@@ -82,12 +86,11 @@ public struct LodePNGRGB<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
 		values = (r.bigEndian, g.bigEndian, b.bigEndian)
 	}
 
-	@inlinable public init(from buffer: UnsafeRawBufferPointer, index: Int) {
-		let tmp = buffer.bindMemory(to: (Value, Value, Value).self)[index]
-		values = (.init(bigEndian: tmp.0), .init(bigEndian: tmp.1), .init(bigEndian: tmp.2))
+	@inlinable public init(from buffer: UnsafePointer<BufferType>, index: Int) {
+		values = buffer[index]
 	}
-	@inlinable public func store(to buffer: UnsafeMutableRawBufferPointer, index: Int) {
-		buffer.bindMemory(to: (Value, Value, Value).self)[index] = (values.0.bigEndian, values.1.bigEndian, values.2.bigEndian)
+	@inlinable public func store(to buffer: UnsafeMutablePointer<BufferType>, index: Int) {
+		buffer[index] = values
 	}
 }
 
@@ -95,11 +98,12 @@ public struct LodePNGRGB<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
 
 /// A pixel storing one color and one alpha
 public struct LodePNGGrayAlpha<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
+	public typealias BufferType = (Value, Value)
 	@inlinable public static var bitDepth: UInt32 { return UInt32(MemoryLayout<Value>.size * 8) }
 	@inlinable public static var enumValue: LodePNGColorType { return .LCT_GREY_ALPHA }
 	@inlinable public static var bpp: Int { return Int(bitDepth) * 2 }
 
-	@usableFromInline var values: (Value, Value)
+	@usableFromInline var values: BufferType
 
 	@inlinable public var g: Value { get { return .init(bigEndian: values.0) } set { values.0 = newValue.bigEndian } }
 	@inlinable public var a: Value { get { return .init(bigEndian: values.1) } set { values.1 = newValue.bigEndian } }
@@ -108,22 +112,22 @@ public struct LodePNGGrayAlpha<Value: LodePNGNormalSupportedColor>: LodePNGPixel
 		values = (g.bigEndian, a.bigEndian)
 	}
 
-	@inlinable public init(from buffer: UnsafeRawBufferPointer, index: Int) {
-		let tmp = buffer.bindMemory(to: (Value, Value).self)[index]
-		values = (.init(bigEndian: tmp.0), .init(bigEndian: tmp.1))
+	@inlinable public init(from buffer: UnsafePointer<BufferType>, index: Int) {
+		values = buffer[index]
 	}
-	@inlinable public func store(to buffer: UnsafeMutableRawBufferPointer, index: Int) {
-		buffer.bindMemory(to: (Value, Value).self)[index] = (values.0.bigEndian, values.1.bigEndian)
+	@inlinable public func store(to buffer: UnsafeMutablePointer<BufferType>, index: Int) {
+		buffer[index] = values
 	}
 }
 
 /// A pixel storing one color value
 public struct LodePNGGrayscale<Value: LodePNGNormalSupportedColor>: LodePNGPixel {
+	public typealias BufferType = Value
 	@inlinable public static var bitDepth: UInt32 { return UInt32(MemoryLayout<Value>.size * 8) }
 	@inlinable public static var enumValue: LodePNGColorType { return .LCT_GREY }
 	@inlinable public static var bpp: Int { return Int(bitDepth) }
 
-	@usableFromInline var value: Value
+	@usableFromInline var value: BufferType
 
 	@inlinable public var g: Value { get { return .init(bigEndian: value) } set { value = newValue.bigEndian } }
 
@@ -131,11 +135,11 @@ public struct LodePNGGrayscale<Value: LodePNGNormalSupportedColor>: LodePNGPixel
 		value = g.bigEndian
 	}
 
-	@inlinable public init(from buffer: UnsafeRawBufferPointer, index: Int) {
-		value = buffer.bindMemory(to: Value.self)[index]
+	@inlinable public init(from buffer: UnsafePointer<BufferType>, index: Int) {
+		value = buffer[index]
 	}
-	@inlinable public func store(to buffer: UnsafeMutableRawBufferPointer, index: Int) {
-		buffer.bindMemory(to: Value.self)[index] = value
+	@inlinable public func store(to buffer: UnsafeMutablePointer<BufferType>, index: Int) {
+		buffer[index] = value
 	}
 }
 
@@ -158,6 +162,7 @@ public enum LodePNGFourBitColor: LodePNGSmallColor {
 
 /// Grayscale pixel with size less than one byte
 public struct LodePNGSmallGrayscale<Value: LodePNGSmallColor>: LodePNGPixel {
+	public typealias BufferType = UInt8
 	@inlinable public static var bitDepth: UInt32 { return Value.bits }
 	@inlinable public static var enumValue: LodePNGColorType { return .LCT_GREY }
 	@inlinable public static var bpp: Int { return Int(bitDepth) }
@@ -172,11 +177,11 @@ public struct LodePNGSmallGrayscale<Value: LodePNGSmallColor>: LodePNGPixel {
 		self.g = g & Self.mask
 	}
 
-	@inlinable public init(from buffer: UnsafeRawBufferPointer, index: Int) {
+	@inlinable public init(from buffer: UnsafePointer<BufferType>, index: Int) {
 		g = (buffer[Self.actualIndex(index)] >> Self.shiftAmount(index)) & Self.mask
 	}
 
-	@inlinable public func store(to buffer: UnsafeMutableRawBufferPointer, index: Int) {
+	@inlinable public func store(to buffer: UnsafeMutablePointer<BufferType>, index: Int) {
 		let smask = Self.mask << Self.shiftAmount(index)
 		let toWrite = g << Self.shiftAmount(index)
 		buffer[Self.actualIndex(index)] &= ~smask
