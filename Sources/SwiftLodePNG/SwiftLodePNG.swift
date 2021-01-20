@@ -44,7 +44,7 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 		}
 	}
 
-	public class Buffer {
+	public struct UnsafeMutableBuffer {
 		@usableFromInline var raw: UnsafeMutableRawPointer?
 		@usableFromInline let width: UInt32
 		@usableFromInline let height: UInt32
@@ -82,77 +82,95 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 			return try withUnsafeMutableBytes { try execute(.init($0)) }
 		}
 
-		@inlinable init(width: UInt32, height: UInt32, rawAllocator: (Int) -> UnsafeMutableRawPointer) {
-			(self.width, self.height, self.raw) = (width, height, nil)
-			self.raw = rawAllocator(size)
-			bindBuffer()
-			checkSize()
-		}
-
 		@inlinable subscript(unchecked i: Int) -> Color {
 			get {
 				Color(from: .init(raw!.assumingMemoryBound(to: Color.BufferType.self)), index: i)
 			}
-			set {
+			nonmutating set {
 				newValue.store(to: raw!.assumingMemoryBound(to: Color.BufferType.self), index: i)
 			}
 		}
 
-		@usableFromInline convenience init(copying other: Buffer) {
+		@inlinable public subscript(x x: Int, y y: Int) -> Color {
+			get {
+				precondition((0..<Int(width)).contains(x) && (0..<Int(height)).contains(y))
+				return self[unchecked: x + y * Int(width)]
+			}
+			nonmutating set {
+				precondition((0..<Int(width)).contains(x) && (0..<Int(height)).contains(y))
+				self[unchecked: x + y * Int(width)] = newValue
+			}
+		}
+
+		@inlinable init(width: UInt32, height: UInt32, raw: UnsafeMutableRawPointer?) {
+			(self.width, self.height, self.raw) = (width, height, raw)
+		}
+	}
+
+	@usableFromInline final class COWHelper {
+		@usableFromInline var buffer: UnsafeMutableBuffer
+
+		@inlinable init(width: UInt32, height: UInt32, rawAllocator: (Int) -> UnsafeMutableRawPointer) {
+			buffer = .init(width: width, height: height, raw: nil)
+			buffer.raw = rawAllocator(buffer.size)
+			buffer.bindBuffer()
+			buffer.checkSize()
+		}
+
+		@usableFromInline convenience init(copying other: UnsafeMutableBuffer) {
 			self.init(width: other.width, height: other.height) {
 				let ptr = malloc($0)!
 				ptr.copyMemory(from: other.raw!, byteCount: $0)
 				return ptr
 			}
-			checkSize()
 		}
 
 		deinit {
-			if let raw = raw {
+			if let raw = buffer.raw {
 				free(raw)
 			}
 		}
 	}
 
-	public var actual: Buffer
+	@usableFromInline var actual: COWHelper
+
+	@inlinable func withBuffer<Return>(_ execute: (UnsafeMutableBuffer) throws -> Return) rethrows -> Return {
+		return try withExtendedLifetime(actual) { try execute($0.buffer) }
+	}
 
 	/// Gives access to the internal buffer
 	/// Note: Not safe to keep the buffer outside of the function
-	@inlinable public mutating func withMutableBuffer<Return>(_ execute: (Buffer) throws -> Return) rethrows -> Return {
+	@inlinable public mutating func withMutableBuffer<Return>(_ execute: (UnsafeMutableBuffer) throws -> Return) rethrows -> Return {
 		makeMutable()
-		return try execute(actual)
+		return try withBuffer(execute)
 	}
 
 	/// The image width
-	@inlinable public var width: Int { return Int(actual.width) }
+	@inlinable public var width: Int { return Int(actual.buffer.width) }
 	/// The image height
-	@inlinable public var height: Int { return Int(actual.height) }
+	@inlinable public var height: Int { return Int(actual.buffer.height) }
 	/// Bytes per image color value
 	@inlinable public var bitDepth: Int { return Int(Color.bitDepth) }
 	@inlinable mutating func makeMutable() {
 		if !isKnownUniquelyReferenced(&actual) {
-			actual = Buffer(copying: actual)
+			actual = withBuffer { COWHelper(copying: $0) }
 		}
 	}
 	/// Gives mutable access to raw storage
 	@inlinable mutating func withUnsafeMutableBytes<Return>(_ execute: (UnsafeMutableRawBufferPointer) throws -> Return) rethrows -> Return {
-		makeMutable()
-		return try actual.withUnsafeMutableBytes(execute)
+		return try withMutableBuffer { try $0.withUnsafeMutableBytes(execute) }
 	}
 	/// Gives access to raw storage
 	@inlinable func withUnsafeBytes<Return>(_ execute: (UnsafeRawBufferPointer) throws -> Return) rethrows -> Return {
-		return try actual.withUnsafeMutableBytes { try execute(.init($0)) }
+		return try withBuffer { try $0.withUnsafeBytes(execute) }
 	}
 
 	@inlinable public subscript(x x: Int, y y: Int) -> Color {
 		get {
-			precondition((0..<width).contains(x) && (0..<height).contains(y))
-			return actual[unchecked: x + y * width]
+			return withBuffer { $0[x: x, y: y] }
 		}
 		set {
-			precondition((0..<width).contains(x) && (0..<height).contains(y))
-			makeMutable()
-			actual[unchecked: x + y * width] = newValue
+			withMutableBuffer { $0[x: x, y: y] = newValue }
 		}
 	}
 
@@ -193,11 +211,15 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 
 	/// Encode the image to an `UnsafeRawBufferPointer` which must be freed using `free()`
 	public func encodeToUnsafePointer() throws -> UnsafeMutableRawBufferPointer {
-		var out: UnsafeMutablePointer<UInt8>? = nil
-		var outsize = 0
-		let ptr = actual.raw!.bindMemory(to: UInt8.self, capacity: actual.size)
-		try LodePNGImage.throwIfError(lodepng_encode_memory(&out, &outsize, ptr, actual.width, actual.height, Color.enumValue, Color.bitDepth))
-		return UnsafeMutableRawBufferPointer(start: out.map(UnsafeMutableRawPointer.init), count: outsize)
+		let width = actual.buffer.width
+		let height = actual.buffer.height
+		return try withUnsafeBytes { buffer in
+			var out: UnsafeMutablePointer<UInt8>? = nil
+			var outsize = 0
+			let ptr = buffer.baseAddress!.bindMemory(to: UInt8.self, capacity: buffer.count)
+			try LodePNGImage.throwIfError(lodepng_encode_memory(&out, &outsize, ptr, width, height, Color.enumValue, Color.bitDepth))
+			return UnsafeMutableRawBufferPointer(start: out.map(UnsafeMutableRawPointer.init), count: outsize)
+		}
 	}
 
 	/// Encode the image to a Foundation `Data`
@@ -206,7 +228,7 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 		return Data(bytesNoCopy: ptr.baseAddress!, count: ptr.count, deallocator: .free)
 	}
 
-	@inlinable init(_ actual: Buffer) {
+	@inlinable init(_ actual: COWHelper) {
 		self.actual = actual
 	}
 
@@ -216,11 +238,11 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 		_ execute: (LodePNGImage) throws -> Result
 	) rethrows -> Result {
 		let ptr = UnsafeMutableRawPointer(mutating: data.baseAddress!) // COW will prevent modifications
-		let image = Buffer(width: UInt32(width), height: UInt32(height)) { size in
+		let image = COWHelper(width: UInt32(width), height: UInt32(height)) { size in
 			precondition(data.count >= size)
 			return ptr
 		}
-		defer { image.raw = nil }
+		defer { image.buffer.raw = nil }
 		return try execute(.init(image))
 	}
 
@@ -235,14 +257,14 @@ public struct LodePNGImage<Color: LodePNGPixel> {
 	/// Take ownership of the image's buffer, destroying it
 	@inlinable public mutating func takeOwnershipOfBuffer() -> UnsafeMutableRawBufferPointer {
 		makeMutable()
-		let out = actual.buffer
-		actual.raw = nil
+		let out = actual.buffer.buffer
+		actual.buffer.raw = nil
 		return out
 	}
 }
 
-extension LodePNGImage.Buffer: Equatable {
-	@inlinable public static func == (lhs: LodePNGImage.Buffer, rhs: LodePNGImage.Buffer) -> Bool {
+extension LodePNGImage.UnsafeMutableBuffer: Equatable {
+	@inlinable public static func == (lhs: LodePNGImage.UnsafeMutableBuffer, rhs: LodePNGImage.UnsafeMutableBuffer) -> Bool {
 		guard lhs.width == rhs.width && lhs.height == rhs.height else { return false }
 		return lhs.withUnsafeBytes { lhsptr in
 			return rhs.withUnsafeBytes { rhsptr in
@@ -254,11 +276,11 @@ extension LodePNGImage.Buffer: Equatable {
 
 extension LodePNGImage: Equatable {
 	@inlinable public static func == (lhs: LodePNGImage, rhs: LodePNGImage) -> Bool {
-		return lhs.actual == rhs.actual
+		return lhs.withBuffer { lb in rhs.withBuffer { rb in lb == rb } }
 	}
 }
 
-extension LodePNGImage.Buffer: RandomAccessCollection, MutableCollection {
+extension LodePNGImage.UnsafeMutableBuffer: RandomAccessCollection, MutableCollection {
 	public typealias Element = Color
 
 	@inlinable public var startIndex: Int { 0 }
@@ -270,7 +292,7 @@ extension LodePNGImage.Buffer: RandomAccessCollection, MutableCollection {
 			precondition(indices.contains(position))
 			return self[unchecked: position]
 		}
-		set {
+		nonmutating set {
 			precondition(indices.contains(position))
 			self[unchecked: position] = newValue
 		}
@@ -286,11 +308,10 @@ extension LodePNGImage: RandomAccessCollection, MutableCollection {
 
 	@inlinable public subscript(position: Int) -> Color {
 		get {
-			return actual[position]
+			return withBuffer { $0[position] }
 		}
 		set {
-			makeMutable()
-			actual[position] = newValue
+			withMutableBuffer { $0[position] = newValue }
 		}
 	}
 }
